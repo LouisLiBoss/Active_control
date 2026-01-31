@@ -35,6 +35,14 @@ unsigned long lastTime;
 const unsigned long DT_MICROS = 3333;
 const float FIXED_DT = 3333.0f / 1000000.0f; // dt constant pour alléger loop()
 
+#include <Arduino.h>
+#include <Wire.h>
+#include "ArtronShop_SPL06-001.h"
+#include <ICM42688.h>
+
+ArtronShop_SPL06_001 spl06(0x76, &Wire); 
+ICM42688 imu(Wire, 0x68);
+
 // --- Contraintes Servo (output min/max) ---
 const float OUT_MIN = -1.0f;
 const float OUT_MAX = 1.0f;
@@ -51,6 +59,9 @@ void setup() {
     finServo.attach(SERVO_PIN);
     currentGains = lowSpeed; // Initialisation par défaut (lowSpeed ? et c'est à la fin de la combustion que la vitesse est maximale, n'est ce pas ?)
     lastTime = micros();
+    // baromètre SPL06-001
+    Wire.begin();       // Indispensable pour l'I2C
+    spl06.begin();      // Réveille le baromètre
 }
 
 void loop() {
@@ -123,9 +134,15 @@ void applyOutput(float out) {
 }
 
 // Fonction déportée pour la lecture de la pression
-float getPressure() { // Reste à implémenter la lecture de la pression (SPL06-001)
+float getPressure() {
+    // Lecture de la pression via la bibliothèque ArtronShop
+    float p = spl06.pressure();
     
-    return 1013.25f; 
+    // Sécurité : si le capteur renvoie une valeur incohérente (0 ou négatif)
+    // on renvoie P0 (pression standard) pour ne pas faire planter le PID.
+    if (p <= 0) return P0; 
+    
+    return p;
 }
 
 // Fonction déportée pour la lecture de l'angle
