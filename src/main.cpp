@@ -122,13 +122,17 @@ void loop() { // boucle principale optimisée pour 300 Hz, avec contrôle strict
 // Pression, altitude et vitesse verticale, puis filtre passe-bas de l'altitude
 void updateNavigation(float dt) {
     pressure = getPressure();
-    // Formule barométrique optimisée avec powf (calcul de l'altitude grâce à la pression)
-    float rawAltitude = 44330.0f * (1.0f - powf(pressure * INV_P0, 0.1903f)); // rawAltitude : altitude brute avant filtrage, fonction mathématique powf pour les exposants, celui-ci étant dans ce cas 0.1903
+    float rawAltitude = 44330.0f * (1.0f - powf(pressure * INV_P0, 0.1903f));
     
-    // Filtre passe-bas (0.8/0.2) pour lisser la vitesse
-    altitude = (0.8f * lastAltitude) + (0.2f * rawAltitude); 
-    verticalVelocity = (altitude - lastAltitude) / dt;
-    lastAltitude = altitude;
+    // 1. Calcul de la vitesse brute (réactivité maximale)
+    float rawVelocity = (rawAltitude - lastAltitude) / dt;
+
+    // 2. Filtrage de la vitesse (optionnel, pour éviter les coups de calculs brusques)
+    verticalVelocity = (0.7f * verticalVelocity) + (0.3f * rawVelocity);
+
+    // 3. Mise à jour pour le prochain cycle
+    altitude = rawAltitude; // On garde l'altitude pour le log
+    lastAltitude = rawAltitude;
 }
 
 // Sélection des gains PID en fonction de la vitesse verticale (exemple)
