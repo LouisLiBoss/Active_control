@@ -1,10 +1,19 @@
 // fichier main testant des fonctions écartées de la boucle prinicpale pour optimisation
 #include <Arduino.h>
 #include <Servo.h>
+#include <Wire.h>
+#include <SerialFlash.h>
+#include "ArtronShop_SPL06-001.h"
+#include <ICM42688.h>
 
 // --- Configuration Matérielle ---
 const int SERVO_PIN = 5; // Pin connecté au servo PTK 7466W
 Servo finServo; // Utilisation de la bibliothèque "Servo"
+const int FLASH_CS_PIN = 10; // Pin pour la mémoire Flash W25Q128
+uint32_t flashAddress = 0; // Pour savoir où on en est dans la mémoire
+
+ArtronShop_SPL06_001 spl06(0x76, &Wire); // adresse nécessaire pour l'I2C, à vérifier selon le câblage (0x76 ou 0x77)
+ICM42688 imu(Wire, 0x68);
 
 // --- Structure et Paramètres du Gain Scheduling ---
 struct PIDGains { 
@@ -35,16 +44,8 @@ unsigned long lastTime;
 const unsigned long DT_MICROS = 3333;
 const float FIXED_DT = 3333.0f / 1000000.0f; // dt constant pour alléger loop()
 
-#include <Arduino.h>
-#include <Wire.h>
-#include "ArtronShop_SPL06-001.h"
-#include <ICM42688.h>
-
-ArtronShop_SPL06_001 spl06(0x76, &Wire); 
-ICM42688 imu(Wire, 0x68);
-
 // --- Contraintes Servo (output min/max) ---
-const float OUT_MIN = -1.0f;
+const float OUT_MIN = -1.0f; // pid limité en 0.26f à vérifier (-1;1?)
 const float OUT_MAX = 1.0f;
 
 // --- Fonctions déportées pour facilitation de la lecture de la boucle principale ---
@@ -62,9 +63,14 @@ void setup() {
     // baromètre SPL06-001
     Wire.begin();       // Indispensable pour l'I2C
     spl06.begin();      // Réveille le baromètre
+
+    // Mémoire Flash W25Q128
+    if (!SerialFlash.begin(FLASH_CS_PIN)) {
+        Serial.println("Erreur : Mémoire Flash introuvable !");
+    }
 }
 
-void loop() {
+void loop() { // boucle principale optimisée pour 300 Hz, avec contrôle strict du timing et fonctions déportées pour la lisibilité
     unsigned long currentTime = micros();
     
     // Contrôle strict du timing (300 Hz)
@@ -94,11 +100,21 @@ void loop() {
         // 5. Saturation et Envoi au Servo
         applyOutput(output); // output = out plus tard dans "applyOutput"
 
-        // 6. Data Logging
-        Serial.print(altitude); Serial.print(",");
-        Serial.print(verticalVelocity); Serial.print(",");
-        Serial.print(currentAngle); Serial.print(",");
-        Serial.println(output);
+        // --- 6. Data Logging (Mémoire Flash Interne) ---
+        struct LogPacket {
+            uint32_t time;
+            float alt;
+            float vel;
+            float ang;
+        };
+
+        LogPacket packet = { micros(), altitude, verticalVelocity, currentAngle };
+
+        // Si l'adresse dépasse 16 Mo, on arrête d'écrire pour éviter un éventuel plantage.
+        if (flashAddress + sizeof(packet) <= 16777216) {
+        SerialFlash.write(flashAddress, &packet, sizeof(packet));
+        flashAddress += sizeof(packet); // Incrément de l'adresse pour le prochain enregistrement, pour éviter d'écraser les données précédentes
+        }
     }
 }
 
