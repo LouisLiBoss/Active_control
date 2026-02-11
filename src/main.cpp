@@ -34,10 +34,8 @@ PIDGains currentGains; // Voir ligne 52
 float error, lastError, integral, derivative, output; // Variables pour le PID (voir ligne 74 à 81) )
 float setpoint = 0.0f; // consigne de vitesse angulaire (rad/s)
 float pressure, altitude, lastAltitude, verticalVelocity; // variables pour vitesse verticale (voir ligne 96 à 104)
-
-// Constantes pour optimisation barométrique (pour calculer l'altitude, on va avoir besoin de diviser par la pression atmosphérique, ce qui est long, donc un fais l'inverse pour pouvoir multiplier plus tard)
-const float P0 = 1013.25f;
-const float INV_P0 = 1.0f / P0;
+float invGroundPressure;
+float P0 =1013.25f;
 
 // --- Timing (300 Hz) ---
 unsigned long lastTime;
@@ -67,21 +65,40 @@ void setup() {
     lastTime = micros();
     // baromètre SPL06-001
     Wire.begin();       // Indispensable pour l'I2C
-    spl06.begin();      // Réveille le baromètre
+    spl06.begin();
+    delay(200); // Laisse le capteur se stabiliser
+    
+    // On calcule la pression moyenne au sol (Tare/calibration)
+    float sumP = 0;
+    for(int i=0; i<50; i++) {
+        sumP += spl06.pressure();
+        delay(10);
+    }
+    float avgP = sumP / 50.0f; 
+    invGroundPressure = 1.0f / avgP;
+    Serial.println("Calibration du baromètre terminée. Pression au sol : ");
 
     // IMU ICM42688P
     if (imu.begin() < 0) {
         Serial.println("Erreur : ICM42688 introuvable !");
-    } else { // configuration du mode Expert pour le filtre nattif de l'ICM42688
+    } else { // configuration du mode Expert...
         Serial.println("ICM42688 connecté. Configuration du mode Expert...");
         imu.setGyroFS(ICM42688::dps2000); 
-        imu.setGyroODR(ICM42688::odr1k);
-        Serial.println("Gyro configuré : FS=2000, ODR=1kHz");
+        imu.setGyroODR(ICM42688::odr1k); 
+        
+        delay(100); 
+
+        Serial.println("Calibration du Gyroscope... NE PAS BOUGER LA FUSEE");
+        imu.calibrateGyro(); 
+        
+        Serial.println("Gyro configuré et calibré !");
     }
 
     // Mémoire Flash W25Q128
     if (!SerialFlash.begin(FLASH_CS_PIN)) {
         Serial.println("Erreur : Mémoire Flash introuvable !");
+    } else {
+        Serial.println("Mémoire Flash W25Q128 initialisée !");
     }
 }
 
@@ -99,7 +116,7 @@ void loop() { // boucle principale optimisée pour 300 Hz, avec contrôle strict
         selectGains();
 
         // 3. Acquisition Angle pour data logging, mais aussi en même temps mise à jour de la vitesse angulaire pour le PID
-        float currentAngle = readIMU(); 
+        float Angle = readIMU(); 
 
         // 5. Calcul de l'erreur pour le PID
         error = setpoint - rollRate;
@@ -123,23 +140,24 @@ void loop() { // boucle principale optimisée pour 300 Hz, avec contrôle strict
             float alt;
             float vel;
             float ang;
+            float rollRate;
         };
 
-        LogPacket packet = { micros(), altitude, verticalVelocity, currentAngle };
+        LogPacket packet = { micros(), altitude, verticalVelocity, Angle, rollRate };
 
         // Si l'adresse dépasse 16 Mo, on arrête d'écrire pour éviter un éventuel plantage.
         if (flashAddress + sizeof(packet) <= 16777216) {
         SerialFlash.write(flashAddress, &packet, sizeof(packet));
         flashAddress += sizeof(packet); // Incrément de l'adresse pour le prochain enregistrement, pour éviter d'écraser les données précédentes
-        }
-    }
+        } 
+    } // prochaine étape logger beaucoup plus de trucs
 }
 
 
 // Pression, altitude et vitesse verticale, puis filtre passe-bas de l'altitude
 void updateNavigation(float dt) {
     pressure = getPressure();
-    float rawAltitude = 44330.0f * (1.0f - powf(pressure * INV_P0, 0.1903f));
+    float rawAltitude = 44330.0f * (1.0f - powf(pressure * invGroundPressure, 0.1903f));
     
     // 1. Calcul de la vitesse brute (réactivité maximale)
     float rawVelocity = (rawAltitude - lastAltitude) / dt;
