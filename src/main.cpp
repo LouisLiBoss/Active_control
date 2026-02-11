@@ -32,7 +32,7 @@ PIDGains currentGains; // Voir ligne 52
 
 // --- Variables de contrôle et de la vitesse verticale (dérivée de l'altitude) ---
 float error, lastError, integral, derivative, output; // Variables pour le PID (voir ligne 74 à 81) )
-float setpoint = 0.0f; // consigne d'angle
+float setpoint = 0.0f; // consigne de vitesse angulaire (rad/s)
 float pressure, altitude, lastAltitude, verticalVelocity; // variables pour vitesse verticale (voir ligne 96 à 104)
 
 // Constantes pour optimisation barométrique (pour calculer l'altitude, on va avoir besoin de diviser par la pression atmosphérique, ce qui est long, donc un fais l'inverse pour pouvoir multiplier plus tard)
@@ -48,12 +48,17 @@ const float FIXED_DT = 3333.0f / 1000000.0f; // dt constant pour alléger loop()
 const float OUT_MIN = -1.0f; // pid limité en 0.26f à vérifier (-1;1?)
 const float OUT_MAX = 1.0f;
 
+// --- Variables pour le Filtre Complémentaire, fonction readIMU, angle, coeff et vitesse angulaire ---
+float angle_roll = 0.0f;
+const float ALPHA = 0.96f;
+float rollRate = 0.0f; // pour le PID
+
 // --- Fonctions déportées pour facilitation de la lecture de la boucle principale ---
 void updateNavigation(float dt); // Mise à jour de l'altitude et de la vitesse verticale
 void selectGains(); // Sélection des gains PID selon la vitesse verticale
 void applyOutput(float out); // Application de la sortie PID au servo avec saturation
 float getPressure(); // Lecture de la pression atmosphérique par le baromètre SPL06-001
-float readIMU();      // Lecture de l'angle par le gyroscope ICM42688P
+float readIMU();      // Lecture de la vitesse angulaire par le gyroscope ICM42688P
 
 void setup() {
     Serial.begin(115200);
@@ -64,6 +69,11 @@ void setup() {
     Wire.begin();       // Indispensable pour l'I2C
     spl06.begin();      // Réveille le baromètre
 
+    // IMU ICM42688P
+    if (imu.begin() < 0) {
+        Serial.println("Erreur : ICM42688 introuvable !");
+    }
+    
     // Mémoire Flash W25Q128
     if (!SerialFlash.begin(FLASH_CS_PIN)) {
         Serial.println("Erreur : Mémoire Flash introuvable !");
@@ -80,14 +90,16 @@ void loop() { // boucle principale optimisée pour 300 Hz, avec contrôle strict
         // 1. Mise à jour Navigation (Altitude/Vitesse)
         updateNavigation(FIXED_DT); // FIXED_DT = dt plus tard dans "updateNavigation"
 
-        // 2. Acquisition Angle et calcul Erreur
-        float currentAngle = readIMU(); 
-        error = setpoint - currentAngle;
-
-        // 3. Choix des gains selon la vitesse (Gain Scheduling)
+        // 2. Choix des gains selon la vitesse (Gain Scheduling)
         selectGains();
 
-        // 4. Calcul PID avec Anti-Windup (Clamping)
+        // 3. Acquisition Angle pour data logging, mais aussi en même temps mise à jour de la vitesse angulaire pour le PID
+        float currentAngle = readIMU(); 
+
+        // 5. Calcul de l'erreur pour le PID
+        error = setpoint - rollRate;
+
+        // 6. Calcul PID avec Anti-Windup (Clamping)
         if (!(output >= OUT_MAX && error > 0) && !(output <= OUT_MIN && error < 0)) { // clamping
             integral += error * FIXED_DT; // Calcul de l'intégrale
         }
@@ -97,10 +109,10 @@ void loop() { // boucle principale optimisée pour 300 Hz, avec contrôle strict
 
         output = (currentGains.kp * error) + (currentGains.ki * integral) + (currentGains.kd * derivative);
 
-        // 5. Saturation et Envoi au Servo
+        // 7. Saturation et Envoi au Servo
         applyOutput(output); // output = out plus tard dans "applyOutput"
 
-        // --- 6. Data Logging (Mémoire Flash Interne) ---
+        // 8. Data Logging (Mémoire Flash Interne)
         struct LogPacket {
             uint32_t time;
             float alt;
@@ -165,8 +177,19 @@ float getPressure() {
     return p;
 }
 
-// Fonction déportée pour la lecture de l'angle
-float readIMU() { // Reste à implémenter la lecture de l'angle (important : le ICM42688P est sensible aux vibrations, donc bon filtrage et éventuellement soft-mounts mécaniques (petits bouts de caoutchouc))
-   
-    return 0.0f;
+// Fonction déportée pour la lecture de la vitesse angulaire (étonnamment le gyroscope donne naturellement une vitesse angulaire, donc une consigne du même type est plus pratique, pas d'intégration)
+float readIMU() {
+    // 1. Lecture des données
+    imu.getAGT(); 
+
+    // 2. Vitesse de roulis (rad/s)
+    float rollRate = imu.getGyroBiasX();
+
+    // 3. Angle de roulis via l'accéléromètre
+    float accelRoll = atan2(imu.getAccelBiasY_mss(), imu.getAccelBiasZ_mss());
+
+    // 4. FILTRE COMPLÉMENTAIRE (mais qui sert que pour le datalogging de l'angle, ce qui est crucial après le vol pour savoir ce qui s'est passé, alors que durant on ne se servira que de la vitesse angulaire)
+    angle_roll = ALPHA * (angle_roll + rollRate * FIXED_DT) + (1.0f - ALPHA) * accelRoll;
+
+    return angle_roll; 
 }
