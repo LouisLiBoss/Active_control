@@ -72,8 +72,13 @@ void setup() {
     // IMU ICM42688P
     if (imu.begin() < 0) {
         Serial.println("Erreur : ICM42688 introuvable !");
+    } else { // configuration du mode Expert pour le filtre nattif de l'ICM42688
+        Serial.println("ICM42688 connecté. Configuration du mode Expert...");
+        imu.setGyroFS(ICM42688::dps2000); 
+        imu.setGyroODR(ICM42688::odr1k);
+        Serial.println("Gyro configuré : FS=2000, ODR=1kHz");
     }
-    
+
     // Mémoire Flash W25Q128
     if (!SerialFlash.begin(FLASH_CS_PIN)) {
         Serial.println("Erreur : Mémoire Flash introuvable !");
