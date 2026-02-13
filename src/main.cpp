@@ -35,6 +35,7 @@ float error, lastError, integral, derivative, output; // Variables pour le PID (
 float setpoint = 0.0f; // consigne de vitesse angulaire (rad/s)
 float pressure, altitude, lastAltitude, verticalVelocity; // variables pour vitesse verticale (voir ligne 96 à 104)
 float invGroundPressure;
+float currentTemp = 0.0f; // Stocke la température du capteur en Celsius
 float P0 =1013.25f;
 
 // --- Timing (300 Hz) ---
@@ -50,6 +51,7 @@ const float OUT_MAX = 1.0f;
 float angle_roll = 0.0f;
 const float ALPHA = 0.96f;
 float rollRate = 0.0f; // pour le PID
+float accelRoll = 0.0f;
 
 // --- Fonctions déportées pour facilitation de la lecture de la boucle principale ---
 void updateNavigation(float dt); // Mise à jour de l'altitude et de la vitesse verticale
@@ -141,9 +143,11 @@ void loop() { // boucle principale optimisée pour 300 Hz, avec contrôle strict
             float vel;
             float ang;
             float rollRate;
+            float accelRoll;
+            float temp;
         };
 
-        LogPacket packet = { micros(), altitude, verticalVelocity, Angle, rollRate };
+        LogPacket packet = { micros(), altitude, verticalVelocity, Angle, rollRate, accelRoll, currentTemp };
 
         // Si l'adresse dépasse 16 Mo, on arrête d'écrire pour éviter un éventuel plantage.
         if (flashAddress + sizeof(packet) <= 16777216) {
@@ -205,8 +209,10 @@ float readIMU() {
     // 1. Lecture des données
     imu.getAGT(); 
 
+    // rajouter la température
+    currentTemp = imu.temp();
     // 2. Vitesse de roulis (rad/s)
-    float rollRate = imu.getGyroBiasX();
+    rollRate = imu.getGyroBiasX();
 
     // 3. Angle de roulis via l'accéléromètre
     float accelRoll = atan2(imu.getAccelBiasY_mss(), imu.getAccelBiasZ_mss());
