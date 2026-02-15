@@ -33,7 +33,7 @@ PIDGains currentGains; // Voir ligne 52
 // --- Variables de contrôle et de la vitesse verticale (dérivée de l'altitude) ---
 float error, lastError, integral, derivative, output; // Variables pour le PID (voir ligne 74 à 81) )
 float setpoint = 0.0f; // consigne de vitesse angulaire (rad/s)
-float pressure, altitude, lastAltitude, verticalVelocity; // variables pour vitesse verticale (voir ligne 96 à 104)
+float pressure, altitude, lastAltitude, rawVelocity, verticalVelocity; // variables pour vitesse verticale (voir ligne 96 à 104)
 float invGroundPressure;
 float currentTemp = 0.0f; // Stocke la température du capteur en Celsius
 float P0 =1013.25f;
@@ -139,15 +139,21 @@ void loop() { // boucle principale optimisée pour 300 Hz, avec contrôle strict
         // 8. Data Logging (Mémoire Flash Interne)
         struct LogPacket {
             uint32_t time;
+            float pressure;
             float alt;
+            float rawVelocity;
             float vel;
             float ang;
             float rollRate;
             float accelRoll;
             float temp;
+            float error;
+            float integral;
+            float derivative;
+            float output;
         };
 
-        LogPacket packet = { micros(), altitude, verticalVelocity, Angle, rollRate, accelRoll, currentTemp };
+        LogPacket packet = { micros(), pressure, altitude, rawVelocity, verticalVelocity, Angle, rollRate, accelRoll, currentTemp, error, integral, derivative, output };
 
         // Si l'adresse dépasse 16 Mo, on arrête d'écrire pour éviter un éventuel plantage.
         if (flashAddress + sizeof(packet) <= 16777216) {
