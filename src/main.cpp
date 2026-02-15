@@ -87,6 +87,10 @@ void setup() {
     Wire.begin();       // Indispensable pour l'I2C
     spl06.begin();
     delay(200); // Laisse le capteur se stabiliser
+
+    pressure = spl06.pressure();
+    altitude = 44330.0f * (1.0f - powf(pressure * invGroundPressure, 0.1903f));
+    lastAltitude = altitude;
     
     // On calcule la pression moyenne au sol (Tare/calibration)
     float sumP = 0;
@@ -157,7 +161,7 @@ void loop() { // boucle principale optimisée pour 300 Hz, avec contrôle strict
         applyOutput(output); // output = out plus tard dans "applyOutput"
 
         // 8. Data Logging (Mémoire Flash Interne)
-        LogPacket packet = { micros(), altitude, verticalVelocity, Angle, rollRate, currentTemp, integral, derivative, output };
+        LogPacket packet = { currentTime, altitude, verticalVelocity, Angle, rollRate, currentTemp, integral, derivative, output };
 
         // Si l'adresse dépasse 16 Mo, on arrête d'écrire pour éviter un éventuel plantage.
         if (flashAddress + sizeof(packet) <= 16777216) {
@@ -187,7 +191,7 @@ void updateNavigation(float dt) {
     float rawAltitude = 44330.0f * (1.0f - powf(pressure * invGroundPressure, 0.1903f));
     
     // 1. Calcul de la vitesse brute (réactivité maximale)
-    float rawVelocity = (rawAltitude - lastAltitude) / dt;
+    rawVelocity = (rawAltitude - lastAltitude) / dt;
 
     // 2. Filtrage de la vitesse (optionnel, pour éviter les coups de calculs brusques)
     verticalVelocity = (0.7f * verticalVelocity) + (0.3f * rawVelocity);
