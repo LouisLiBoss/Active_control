@@ -38,6 +38,24 @@ float invGroundPressure;
 float currentTemp = 0.0f; // Stocke la température du capteur en Celsius
 float P0 =1013.25f;
 
+// Variables pour Data Logging
+struct LogPacket {
+uint32_t time;
+float alt;
+float vel;
+float ang;
+float rollRate;
+float temp;
+float integral;        
+float derivative;
+float output;
+};
+
+// Variables pour le contrôle du timing de la boucle principale (300 Hz)
+uint32_t maxExecutionTime = 0; // Record de la boucle la plus longue (en µs)
+uint32_t overrunCount = 0;     // Nombre de fois où on a dépassé les 3.3ms
+uint32_t loopStartMicros = 0;  // Pour mesurer la durée de chaque boucle
+
 // --- Timing (300 Hz) ---
 unsigned long lastTime;
 const unsigned long DT_MICROS = 3333;
@@ -111,6 +129,8 @@ void loop() { // boucle principale optimisée pour 300 Hz, avec contrôle strict
     if (currentTime - lastTime >= DT_MICROS) { 
         lastTime = currentTime;
 
+        loopStartMicros = micros(); // Pour mesurer la durée de la boucle
+
         // 1. Mise à jour Navigation (Altitude/Vitesse)
         updateNavigation(FIXED_DT); // FIXED_DT = dt plus tard dans "updateNavigation"
 
@@ -137,30 +157,27 @@ void loop() { // boucle principale optimisée pour 300 Hz, avec contrôle strict
         applyOutput(output); // output = out plus tard dans "applyOutput"
 
         // 8. Data Logging (Mémoire Flash Interne)
-        struct LogPacket {
-            uint32_t time;
-            float pressure;
-            float alt;
-            float rawVelocity;
-            float vel;
-            float ang;
-            float rollRate;
-            float accelRoll;
-            float temp;
-            float error;
-            float integral;
-            float derivative;
-            float output;
-        };
-
-        LogPacket packet = { micros(), pressure, altitude, rawVelocity, verticalVelocity, Angle, rollRate, accelRoll, currentTemp, error, integral, derivative, output };
+        LogPacket packet = { micros(), altitude, verticalVelocity, Angle, rollRate, currentTemp, integral, derivative, output };
 
         // Si l'adresse dépasse 16 Mo, on arrête d'écrire pour éviter un éventuel plantage.
         if (flashAddress + sizeof(packet) <= 16777216) {
         SerialFlash.write(flashAddress, &packet, sizeof(packet));
         flashAddress += sizeof(packet); // Incrément de l'adresse pour le prochain enregistrement, pour éviter d'écraser les données précédentes
         } 
-    } // prochaine étape logger beaucoup plus de trucs
+
+        // 9. Contrôle du temps d'exécution de la boucle
+        uint32_t executionDuration = micros() - loopStartMicros;
+
+        // On enregistre le record de lenteur
+        if (executionDuration > maxExecutionTime) {
+            maxExecutionTime = executionDuration;
+        }
+
+        // On compte les dépassements (3.33ms = 3333 µs)
+        if (executionDuration > 3333) {
+            overrunCount++;
+        }
+    }
 }
 
 
