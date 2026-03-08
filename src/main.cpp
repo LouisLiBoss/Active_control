@@ -22,13 +22,14 @@ struct PIDGains {
     float kd;
 };
 
-// Tableau de gains pour différentes plages de vitesse (exemple)
-const PIDGains lowSpeed    = {2.0f, 0.8f, 0.15f}; 
-const PIDGains midSpeed     = {1.5f, 0.5f, 0.10f};  
-const PIDGains highSpeed    = {1.0f, 0.3f, 0.05f}; 
-const PIDGains extremeSpeed = {0.7f, 0.2f, 0.03f}; 
+// Tableau de gains
+const PIDGains lowSpeed     = {0.0816f, 5.3373f, 7.587f}; 
+const PIDGains midSpeed     = {0.016591f, 4.203f, 5.1425f};  
+const PIDGains highSpeed    = {1.3841e-07f, 3.4397f, 2.5386f}; 
+const PIDGains extremeSpeed = {0.27429f, 1.0444f, 1.1775f}; 
+const PIDGains lightSpeed   = {0.13683f, 0.49909f, 0.42107f};
 
-PIDGains currentGains; // Voir ligne 52
+PIDGains currentGains;
 
 // --- Variables de contrôle et de la vitesse verticale (dérivée de l'altitude) ---
 float error, lastError, integral, derivative, output; // Variables pour le PID (voir ligne 74 à 81) )
@@ -133,7 +134,7 @@ void loop() { // boucle principale optimisée pour 300 Hz, avec contrôle strict
     if (currentTime - lastTime >= DT_MICROS) { 
         lastTime = currentTime;
 
-        loopStartMicros = micros(); // Pour mesurer la durée de la boucle
+        loopStartMicros = micros(); 
 
         // 1. Mise à jour Navigation (Altitude/Vitesse)
         updateNavigation(FIXED_DT); // FIXED_DT = dt plus tard dans "updateNavigation"
@@ -147,7 +148,7 @@ void loop() { // boucle principale optimisée pour 300 Hz, avec contrôle strict
         // 5. Calcul de l'erreur pour le PID
         error = setpoint - rollRate;
 
-        // 6. Calcul PID avec Anti-Windup (Clamping)
+        // 6. Calcul PID avec anti-saturation de l'intégral
         if (!(output >= OUT_MAX && error > 0) && !(output <= OUT_MIN && error < 0)) { // clamping
             integral += error * FIXED_DT; // Calcul de l'intégrale
         }
@@ -169,15 +170,15 @@ void loop() { // boucle principale optimisée pour 300 Hz, avec contrôle strict
         flashAddress += sizeof(packet); // Incrément de l'adresse pour le prochain enregistrement, pour éviter d'écraser les données précédentes
         } 
 
-        // 9. Contrôle du temps d'exécution de la boucle
+        // 9. Chronomètrage de la boucle
         uint32_t executionDuration = micros() - loopStartMicros;
-
-        // On enregistre le record de lenteur
+        
+        // le record de lenteur
         if (executionDuration > maxExecutionTime) {
             maxExecutionTime = executionDuration;
         }
 
-        // On compte les dépassements (3.33ms = 3333 µs)
+        // le nombre de dépassement
         if (executionDuration > 3333) {
             overrunCount++;
         }
@@ -210,11 +211,11 @@ void selectGains() {
 }
 
 void applyOutput(float out) {
-    // Saturation (Clamping bis, celui qui maintiens la sortie dans les limites)
+    // limitation de u dans [-1;1]
     if (out > OUT_MAX) out = OUT_MAX;
     else if (out < OUT_MIN) out = OUT_MIN;
     
-    // Conversion directe -1/1 vers 1000/2000 us (plus rapide que map :"int pwmValue = map(output * 100, -100, 100, 1000, 2000);" askip)
+    // conversion microsecondes
     int pwm = 1500 + (int)(out * 500.0f);
     finServo.writeMicroseconds(pwm);
 }
@@ -239,10 +240,10 @@ float readIMU() {
     // rajouter la température
     currentTemp = imu.temp();
     // 2. Vitesse de roulis (rad/s)
-    rollRate = imu.getGyroBiasX();
+    rollRate = imu.gyrX() * (PI / 180.0f);  // Convert from deg/s to rad/s
 
     // 3. Angle de roulis via l'accéléromètre
-    float accelRoll = atan2(imu.getAccelBiasY_mss(), imu.getAccelBiasZ_mss());
+    float accelRoll = atan2(imu.accY(), imu.accZ());
 
     // 4. FILTRE COMPLÉMENTAIRE (mais qui sert que pour le datalogging de l'angle, ce qui est crucial après le vol pour savoir ce qui s'est passé, alors que durant on ne se servira que de la vitesse angulaire)
     angle_roll = ALPHA * (angle_roll + rollRate * FIXED_DT) + (1.0f - ALPHA) * accelRoll;
